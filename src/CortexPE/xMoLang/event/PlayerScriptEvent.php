@@ -26,7 +26,7 @@ namespace CortexPE\xMoLang\event;
 
 
 use pocketmine\event\player\PlayerEvent;
-use pocketmine\Player;
+use pocketmine\player\Player;
 
 class PlayerScriptEvent extends PlayerEvent {
 	/** @var string */

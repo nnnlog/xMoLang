@@ -31,9 +31,9 @@ namespace CortexPE\xMoLang;
 
 use CortexPE\xMoLang\behaviorpack\BehaviorPackManager;
 use CortexPE\xMoLang\network\ResourcePacksInfoPacket;
+use CortexPE\xMoLang\network\ScriptCustomEventPacket;
 use pocketmine\network\mcpe\protocol\PacketPool;
-use pocketmine\network\mcpe\protocol\ScriptCustomEventPacket;
-use pocketmine\Player;
+use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 
 class Main extends PluginBase {
@@ -44,7 +44,7 @@ class Main extends PluginBase {
 		$pk = new ScriptCustomEventPacket();
 		$pk->eventName = $scriptEventName;
 		$pk->eventData = json_encode($scriptEventData);
-		$player->sendDataPacket($pk);
+		$player->getNetworkSession()->sendDataPacket($pk);
 	}
 
 	public function onEnable(): void {
@@ -52,6 +52,7 @@ class Main extends PluginBase {
 			$this->getDataFolder() . "behavior_packs" . DIRECTORY_SEPARATOR, $this->getLogger());
 		$this->getServer()->getPluginManager()->registerEvents(new PacketInjector($this), $this);
 		PacketPool::registerPacket(new ResourcePacksInfoPacket());
+		PacketPool::registerPacket(new ScriptCustomEventPacket());
 	}
 
 	/**

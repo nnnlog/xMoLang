@@ -31,6 +31,7 @@ namespace CortexPE\xMoLang;
 
 
 use CortexPE\xMoLang\behaviorpack\BehaviorPack;
+use CortexPE\xMoLang\behaviorpack\ZippedBehaviorPack;
 use CortexPE\xMoLang\event\PlayerScriptEvent;
 use pocketmine\event\Listener;
 use pocketmine\event\server\DataPacketReceiveEvent;
@@ -43,6 +44,8 @@ use pocketmine\network\mcpe\protocol\ResourcePacksInfoPacket;
 use pocketmine\network\mcpe\protocol\ResourcePackStackPacket;
 use pocketmine\network\mcpe\protocol\ScriptCustomEventPacket;
 use pocketmine\network\mcpe\protocol\StartGamePacket;
+use pocketmine\network\mcpe\protocol\types\resourcepacks\ResourcePackInfoEntry;
+use pocketmine\network\mcpe\protocol\types\resourcepacks\ResourcePackStackEntry;
 use ReflectionException;
 
 class PacketInjector implements Listener {
@@ -59,20 +62,24 @@ class PacketInjector implements Listener {
 	 * @priority LOWEST
 	 */
 	public function onPacketSend(DataPacketSendEvent $ev): void {
-		$pk = $ev->getPacket();
-		if($pk instanceof StartGamePacket) {
-			$pk->gameRules["experimentalgameplay"] = [1, true];
-		} elseif($pk instanceof ResourcePacksInfoPacket) {
-			$mgr = $this->loader->getBehaviorPackManager();
-			$pk->behaviorPackEntries = $mgr->getBehaviorPacks();
-			$pk->hasScripts = $mgr->hasClientScripts();
-		} elseif($pk instanceof ResourcePackStackPacket) {
-			$mgr = $this->loader->getBehaviorPackManager();
-			$pk->behaviorPackStack = $mgr->getBehaviorPacks();
-			$pk->isExperimental = true;
+		foreach ($ev->getPackets() as $_ => $pk) {
+			if ($pk instanceof StartGamePacket) {
+				$pk->gameRules["experimentalgameplay"] = [1, true];
+			} elseif ($pk instanceof ResourcePacksInfoPacket) {
+				$mgr = $this->loader->getBehaviorPackManager();
+				$pk->behaviorPackEntries = array_map(function (ZippedBehaviorPack $pack): ResourcePackInfoEntry {
+					return new ResourcePackInfoEntry($pack->getPackId(), $pack->getPackVersion(), $pack->getPackSize(), "", "", "", $pack->hasClientScripts());
+				}, $mgr->getBehaviorPacks());
+				$pk->hasScripts = $mgr->hasClientScripts();
+			} elseif ($pk instanceof ResourcePackStackPacket) {
+				$mgr = $this->loader->getBehaviorPackManager();
+				$pk->behaviorPackStack = array_map(function (ZippedBehaviorPack $pack): ResourcePackStackEntry {
+					return new ResourcePackStackEntry($pack->getPackId(), $pack->getPackVersion(), "");
+				}, $mgr->getBehaviorPacks());
+				$pk->isExperimental = true;
+			}
 		}
 	}
-
 	/**
 	 * @param DataPacketReceiveEvent $ev
 	 *
@@ -84,39 +91,32 @@ class PacketInjector implements Listener {
 		if($pk instanceof ScriptCustomEventPacket) {
 			$eventName = $pk->eventName;
 			$eventData = json_decode($pk->eventData);
-			$ev = new PlayerScriptEvent($ev->getPlayer(), $eventName, $eventData);
+			$ev = new PlayerScriptEvent($ev->getOrigin()->getPlayer(), $eventName, $eventData);
 			$ev->call();
 		} elseif($pk instanceof ResourcePackClientResponsePacket && $pk->status == ResourcePackClientResponsePacket::STATUS_SEND_PACKS) {
-			$player = $ev->getPlayer();
 			$manager = $this->loader->getBehaviorPackManager();
 			$provided = [];
 			foreach($pk->packIds as $uuid) {
 				$pack = $manager->getPackById(substr($uuid, 0,
 					strpos($uuid, "_"))); //dirty hack for mojang's dirty hack for versions
 				if($pack instanceof BehaviorPack) {
-					$resPk = new ResourcePackDataInfoPacket();
-					$resPk->packId = $pack->getPackId();
-					$resPk->maxChunkSize = 1048576; //1MB
-					$resPk->chunkCount = (int)ceil($pack->getPackSize() / $resPk->maxChunkSize);
-					$resPk->compressedPackSize = $pack->getPackSize();
-					$resPk->sha256 = $pack->getSha256();
-					$player->sendDataPacket($resPk);
+					$ev->getOrigin()->sendDataPacket(ResourcePackDataInfoPacket::create(
+							$pack->getPackId(),
+							1048576,
+							(int) ceil($pack->getPackSize() / 1048576),
+							$pack->getPackSize(),
+							$pack->getSha256()
+					));
 					$provided[] = $uuid;
 				}
 			}
 			// remove our behavior packs cuz PM doesnt know about it
 			$pk->packIds = array_diff($pk->packIds, $provided);
 		} elseif($pk instanceof ResourcePackChunkRequestPacket) {
-			$player = $ev->getPlayer();
 			$manager = $this->loader->getBehaviorPackManager();
 			$pack = $manager->getPackById($pk->packId);
 			if($pack instanceof BehaviorPack) {
-				$resPk = new ResourcePackChunkDataPacket();
-				$resPk->packId = $pack->getPackId();
-				$resPk->chunkIndex = $pk->chunkIndex;
-				$resPk->data = $pack->getPackChunk(1048576 * $pk->chunkIndex, 1048576);
-				$resPk->progress = (1048576 * $pk->chunkIndex);
-				$player->sendDataPacket($resPk);
+				$ev->getOrigin()->sendDataPacket(ResourcePackChunkDataPacket::create($pk->packId, $pk->chunkIndex, $pk->chunkIndex * 1048576, $pack->getPackChunk($pk->chunkIndex * 1048576, 1048576)));
 				$ev->setCancelled(); // lets not let PM know about this
 			}
 		}

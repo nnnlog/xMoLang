@@ -4,7 +4,7 @@
  * @name CustomScriptingUI
  * @main CortexPE\xMoLang\test\CustomScriptingUI
  * @version 1.0.0
- * @api 3.0.0
+ * @api 4.0.0
  * @description Sample plugin to test xMolang
  * @author Spajker7, CortexPE
  */
